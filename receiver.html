@@ -1,0 +1,154 @@
+<!--
+Copyright (C) 2014 Rob Charlton
+-->
+<!DOCTYPE html>
+<html>
+  <head>
+    <style type="text/css">
+	  body {
+	    overflow:hidden;
+	  }
+      iframe{
+	    height:720PX;
+	    width:1280PX;
+	    text-align:center;
+	    border:0px solid silver;
+	    display: table-cell;
+	    vertical-align:middle;
+	    color:#FFFFFF;
+	    background-color:#000000;
+	    font-weight:bold;
+	    font-family:Verdana, Geneva, sans-serif;
+	    font-size:40px;
+            -webkit-transform: scale(1);
+            -webkit-transform-origin: 0 0;
+	}
+#overlay {
+    position:fixed;
+    top:610px;
+    left:20px;
+    width:100%;
+    height:100%;
+    background:#000;
+    opacity:0.3;
+    /*background:rgba(255,255,255,0.8); or just this*/
+    z-index:50;
+    color:#fff;
+    font-weight:bold;
+    font-family:Verdana, Geneva, sans-serif;
+    font-size:80px;
+}
+    </style>
+    <title>Dashboard Cast</title>
+  </head>
+  <body>
+	<iframe id="viewer" src=""></iframe>
+	<div id="overlay"></div>
+
+    <script type="text/javascript" src="//www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
+    <script type="text/javascript">
+      var url_list = [
+          {url:"http://news.bbc.co.uk", title:"BBC", time:15},
+          {url:"http://news.ycombinator.org", title:"Hacker News", time:15},
+          {url:"http://xkcd.com", title:"XKCD", time:15}
+      ];
+      var cur_url = 0;
+
+      function sendStatus() {
+        // Broadcast URL status to any connected receivers
+        var status = {name:"status", cur_url:cur_url, url_list:url_list};
+        //console.log("Broadcast status: " + JSON.stringify(status));
+        window.messageBus.broadcast(JSON.stringify(status));
+      } 
+
+      window.onload = function() {
+        cast.receiver.logger.setLevelValue(0);
+        window.castReceiverManager = cast.receiver.CastReceiverManager.getInstance();
+        console.log('Starting Receiver Manager');
+        
+        // handler for the 'ready' event
+        castReceiverManager.onReady = function(event) {
+          console.log('Received Ready event: ' + JSON.stringify(event.data));
+          window.castReceiverManager.setApplicationState("Application status is ready...");
+          displayUrl();
+          // when a sender connects, send them the list of URLs
+          sendStatus();
+        };
+        
+        // handler for 'senderconnected' event
+        castReceiverManager.onSenderConnected = function(event) {
+          console.log('Received Sender Connected event: ' + event.data);
+          //console.log(window.castReceiverManager.getSender(event.data).userAgent);
+        };
+        
+        // handler for 'senderdisconnected' event
+        castReceiverManager.onSenderDisconnected = function(event) {
+          console.log('Received Sender Disconnected event: ' + event.data);
+          if (window.castReceiverManager.getSenders().length == 0) {
+	        //window.close();
+              console.log("I'm not going away!");
+	      }
+        };
+        
+        // handler for 'systemvolumechanged' event
+        castReceiverManager.onSystemVolumeChanged = function(event) {
+          console.log('Received System Volume Changed event: ' + event.data['level'] + ' ' +
+              event.data['muted']);
+        };
+
+        // create a CastMessageBus to handle messages for a custom namespace
+        window.messageBus =
+          window.castReceiverManager.getCastMessageBus(
+              'urn:x-cast:com.vertu.cast.status-display');
+
+        // handler for the CastMessageBus message event
+        window.messageBus.onMessage = function(event) {
+          //console.log('Message [' + event.senderId + ']: ' + event.data);
+          var message = JSON.parse(event.data);
+          if (message.name=="status") {
+            onStatusMessage(message);
+          }          
+        }
+
+        // initialize the CastReceiverManager with an application status message
+        window.castReceiverManager.start({statusText: "Application is starting"});
+        console.log('Receiver Manager started');
+      };
+      
+      function onStatusMessage(msg) {
+        console.log("Received status message");
+        // update the URL list
+        url_list = msg.url_list;
+        if (cur_url >= url_list.length) {
+          cur_url = 0;
+        } 
+      }
+
+      // called on a timer to display the next url and set timer
+      function displayUrl() {
+        url_data = url_list[cur_url];
+        console.log("showing url ",url_data.url);
+        // inform connected clients we are showing a URL
+        sendStatus();
+        var iframe = document.getElementById("viewer");
+        iframe.src=url_data.url;
+        document.getElementById("overlay").innerHTML=url_data.title;
+        if (url_data.scale) {
+          iframe.style["-webkit-transform"] = "scale("+url_data.scale+")";
+          iframe.style["-webkit-transform-origin"] = url_data.origin;
+        }
+        else {
+          iframe.style["-webkit-transform"] = "scale(1)";
+          iframe.style["-webkit-transform-origin"] = "0 0";
+        }
+        window.castReceiverManager.setApplicationState(url_data.title);
+        //console.log("waiting for ",url_data.time * 1000, " seconds");
+        setTimeout(displayUrl, url_data.time * 1000);
+        cur_url++;
+        if (cur_url >= url_list.length) {
+          cur_url = 0;
+        } 
+      };
+    </script>
+  </body>
+</html>

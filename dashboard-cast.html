@@ -1,0 +1,322 @@
+<!--
+Copyright (C) 2014 Rob Charlton
+-->
+<!DOCTYPE html>
+<html>
+<head>
+<title>Dashboard Cast Configuration</title>
+<script src="//code.jquery.com/jquery-1.11.0.min.js"></script>
+<script src="//code.jquery.com/jquery-migrate-1.2.1.min.js"></script>
+<!-- Bootstrap -->
+<!-- Latest compiled and minified CSS -->
+<link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
+
+<!-- Optional theme -->
+<link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap-theme.min.css">
+
+<!-- Latest compiled and minified JavaScript -->
+<script src="//maxcdn.bootstrapcdn.com/bootstrap/3.2.0/js/bootstrap.min.js"></script>
+
+<script type="text/javascript" src="//www.gstatic.com/cv/js/sender/v1/cast_sender.js"></script>
+<script type="text/javascript">
+var applicationID = '26826343';
+var namespace = 'urn:x-cast:com.vertu.cast.status-display';
+var session = null;
+var url_list = [];
+var cur_url = 0;
+
+/**
+ * Call initialization for Cast
+ */
+if (!chrome.cast || !chrome.cast.isAvailable) {
+  setTimeout(initializeCastApi, 1000);
+}
+
+/**
+ * initialization
+ */
+function initializeCastApi() {
+  var sessionRequest = new chrome.cast.SessionRequest(applicationID);
+  var apiConfig = new chrome.cast.ApiConfig(sessionRequest,
+    sessionListener,
+    receiverListener);
+
+  chrome.cast.initialize(apiConfig, onInitSuccess, onError);
+};
+
+/**
+ * initialization success callback
+ */
+function onInitSuccess() {
+  appendMessage("onInitSuccess");
+}
+
+/**
+ * initialization error callback
+ */
+function onError(message) {
+  appendMessage("onError: "+JSON.stringify(message));
+}
+
+/**
+ * generic success callback
+ */
+function onSuccess(message) {
+  appendMessage("onSuccess: "+message);
+}
+
+/**
+ * callback on success for stopping app
+ */
+function onStopAppSuccess() {
+  appendMessage('onStopAppSuccess');
+}
+
+/**
+ * session listener during initialization
+ */
+function sessionListener(e) {
+  appendMessage('New session ID:' + e.sessionId);
+  session = e;
+  session.addUpdateListener(sessionUpdateListener);  
+  session.addMessageListener(namespace, receiverMessage);
+  $('#connect').hide();
+  $('#waiting').fadeIn();
+  var msg = {name:"*go*"};
+  sendMessage(JSON.stringify(msg));
+}
+
+/**
+ * listener for session updates
+ */
+function sessionUpdateListener(isAlive) {
+  var message = isAlive ? 'Session Updated' : 'Session Removed';
+  message += ': ' + session.sessionId;
+  appendMessage(message);
+  if (!isAlive) {
+    session = null;
+    $('#connect').fadeIn();
+  }
+};
+
+/**
+ * utility function to log messages from the receiver
+ * @param {string} namespace The namespace of the message
+ * @param {string} messageStr A message string
+ */
+function receiverMessage(namespace, messageStr) {
+
+  var message = (JSON.parse(messageStr));
+  if (message.name=="status") {
+    $('#waiting').fadeOut();
+    onStatusMessage(message);
+  }
+  else {
+    appendMessage("receiverMessage: "+namespace+", "+messageStr);
+  }
+};
+
+function onStatusMessage(msg) {
+  // received a message containing the current URL list in the cast
+  // update our displayed list, and mark the current
+  url_list = msg.url_list;
+  cur_url = msg.cur_url;
+  updateURLs();
+}
+
+function updateURLs() {
+  var replace = "";
+  var litail = "<span class=\"urlremove glyphicon glyphicon-remove-circle pull-right\" id=\"{0}\"></span></li>";
+  var lihead = "<li class=\"list-group-item";
+  for (var i=0; i<url_list.length; i++) {
+    if (i==cur_url) {
+      replace = replace+lihead+" active\">"+url_list[i].title+litail.format(i);  
+    }
+    else {
+      replace = replace+lihead+"\">"+url_list[i].title+litail.format(i);  
+    }
+  }
+  $("ul.list-group").replaceWith("<ul class=\"list-group\">"+replace+"</ul>");
+  $(".urlremove").click(function(e) {
+    var id=$(e.target).attr('id');
+    appendMessage("Remove URL {0}".format(id));
+    // remove UI element
+    $(e.target).parent().remove();
+    // remove from url list
+    url_list.splice(id,1);
+    // send url list
+    var status = {name:"status", cur_url:cur_url, url_list:url_list};
+    sendMessage(JSON.stringify(status));
+  });
+  $(".list-group-item").click(function(e) {
+    var id=$(e.target).children(".urlremove").attr('id');
+    $("#title").val(url_list[id].title);
+    $("#url").val(url_list[id].url);
+    $("#time").val(url_list[id].time);
+    $("#scale").val(url_list[id].scale);
+    $("#origin").val(url_list[id].origin);
+    $("#update-id").val(id);
+    $("#add-button").html("Update");
+  });
+}
+
+function add_update() {
+    var update_id = $("#update-id").val();
+    var the_url;
+    if (update_id) {
+      the_url = url_list[update_id];
+    }
+    else {
+      // create and append new url
+      the_url = {url:"", title:"", time:0};
+    }
+    the_url.url = $("#url").val();
+    the_url.title = $("#title").val();
+    the_url.time = $("#time").val();
+    if( $.trim($("#scale").val()).length ) {
+        the_url.scale = $("#scale").val();
+    }
+    if( $.trim($("#origin").val()).length ) {
+        the_url.origin = $("#origin").val();
+    }
+    if (!update_id) {
+      url_list.push(the_url);
+    }
+    updateURLs();
+    // send url list
+    var status = {name:"status", cur_url:cur_url, url_list:url_list};
+    sendMessage(JSON.stringify(status));
+    $(".url-add").val("");
+    $("#add-button").html("Add");
+}
+
+/**
+ * receiver listener during initialization
+ */
+function receiverListener(e) {
+  if( e === 'available' ) {
+    appendMessage("receiver found");
+  }
+  else {
+    appendMessage("receiver list empty");
+  }
+}
+
+/**
+ * stop app/session
+ */
+function stopApp() {
+  session.stop(onStopAppSuccess, onError);
+}
+
+/**
+ * send a message to the receiver using the custom namespace
+ * receiver CastMessageBus message handler will be invoked
+ * @param {string} message A message string
+ */
+function sendMessage(message) {
+  if (session!=null) {
+    session.sendMessage(namespace, message, onSuccess.bind(this, "Message sent: " + message), onError);
+  }
+  else {
+    chrome.cast.requestSession(sessionListener, onError);
+  }
+}
+
+/**
+ * append message to debug message window
+ * @param {string} message A message string
+ */
+function appendMessage(message) {
+  console.log(message);
+};
+
+function start() {
+  console.log("let's go")
+  chrome.cast.requestSession(sessionListener, onError);
+}
+
+/**
+ * handler for the transcribed text from the speech input
+ * @param {string} words A transcibed speech string
+ */
+function transcribe(words) {
+  sendMessage(words);
+}
+
+// First, checks if it isn't implemented yet.
+if (!String.prototype.format) {
+  String.prototype.format = function() {
+    var args = arguments;
+    return this.replace(/{(\d+)}/g, function(match, number) { 
+      return typeof args[number] != 'undefined'
+        ? args[number]
+        : match
+      ;
+    });
+  };
+}
+
+$( document ).ready(function() {
+  $('#waiting').hide();
+});
+
+</script>
+<style>
+/* Customize container */
+@media (min-width: 768px) {
+  .container {
+    max-width: 730px;
+  }
+}
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="page-header">
+      <h1>Dashboard config <small>Choose URLs to show</small></h1>
+    </div>
+    <div class="well well-sm" id="connect">
+      <p>Just press connect and pick the chromecast to start</p>
+      <div class="btn-group">
+	<button type="button" class="btn btn-default" onclick="JavaScript:start();">Connect</button>
+      </div>
+    </div>
+    <div class="well well-sm" id="waiting">
+      <p>Waiting for URLs</p>
+    </div>
+    <div id="urllist">
+      <ul class="list-group">
+      </ul>
+    </div>
+    <div class="panel panel-default">
+      <div class="panel-body">
+	<div class="row">
+	  <div class="col-lg-12">
+	    <input id="title" type="text" class="form-control url-add" placeholder="Title">
+	  </div>
+	</div>
+	<div class="row">
+	  <div class="col-lg-4">
+	    <input id="time" type="text" class="form-control url-add" placeholder="Display time (seconds)">
+	  </div>
+	  <div class="col-lg-4">
+	    <input id="scale" type="text" class="form-control url-add" placeholder="Scale (default 1)">
+	  </div>
+	  <div class="col-lg-4">
+	    <input id="origin" type="text" class="form-control url-add" placeholder="Origin (default 0 0)">
+	  </div>
+	</div>
+	<div class="input-group">
+	  <input id="url" type="text" class="form-control url-add" placeholder="URL (e.g. http://news.bbc.co.uk)">
+	  <span class="input-group-btn">
+            <button id="add-button" class="btn btn-default" type="button" onclick="JavaScript:add_update();">Add</button>
+	  </span>
+	</div><!-- /input-group -->
+        <input id="update-id" class="url-add" type="hidden">
+      </div>
+    </div>    
+
+  </div>
+</body>
+</html>
